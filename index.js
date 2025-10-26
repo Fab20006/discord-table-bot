@@ -1,5 +1,5 @@
 const { Client, GatewayIntentBits } = require('discord.js');
-const axios = require('axios');
+const puppeteer = require('puppeteer');
 
 console.log('🚀 Démarrage du bot...');
 
@@ -13,34 +13,89 @@ const client = new Client({
 
 // Fonction pour générer l'image - VERSION CORRECTE
 async function generateTableImage(tableText) {
+  let browser;
   try {
-    console.log('📊 Génération du tableau...');
+    console.log('📊 Lancement du navigateur...');
     
-    // URL directe de l'API de génération
-    const response = await axios.get('https://gb.hlorenzi.com/api.png', {
-      params: {
-        data: tableText
-      },
-      responseType: 'arraybuffer',
-      timeout: 30000,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      }
+    browser = await puppeteer.launch({
+      headless: 'new',
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process',
+        '--disable-gpu'
+      ]
     });
 
-    console.log('✅ Tableau généré avec succès!');
-    return Buffer.from(response.data);
+    const page = await browser.newPage();
     
-  } catch (error) {
-    console.error('❌ Erreur API:', error.message);
+    // Aller sur le site de génération de tableaux
+    console.log('🌐 Navigation vers le site...');
+    await page.goto('https://gb.hlorenzi.com/table', { 
+      waitUntil: 'networkidle2',
+      timeout: 30000 
+    });
+
+    console.log('📝 Recherche de la zone de texte...');
     
-    // Message d'erreur plus détaillé
-    if (error.response?.status === 404) {
-      throw new Error('Service de génération non trouvé. Le site peut avoir changé.');
-    } else if (error.code === 'ECONNREFUSED') {
-      throw new Error('Impossible de se connecter au service de génération.');
+    // Attendre que la page soit chargée
+    await page.waitForTimeout(2000);
+    
+    // Trouver le textarea (c'est généralement un textarea pour ce genre de site)
+    const textareaSelector = 'textarea';
+    await page.waitForSelector(textareaSelector, { timeout: 10000 });
+    
+    // Effacer le contenu existant
+    await page.evaluate((selector) => {
+      const textarea = document.querySelector(selector);
+      if (textarea) {
+        textarea.value = '';
+        textarea.focus();
+      }
+    }, textareaSelector);
+    
+    // Coller le texte du tableau
+    console.log('📋 Collage du contenu...');
+    await page.type(textareaSelector, tableText);
+    
+    // Attendre un peu pour être sûr que le texte est bien saisi
+    await page.waitForTimeout(1000);
+    
+    // Prendre une capture d'écran de la zone du tableau
+    console.log('📸 Capture de la zone du tableau...');
+    
+    // Essayer de trouver la zone spécifique du tableau, sinon capturer toute la page
+    const tableArea = await page.$('.table-container, .output, canvas, #output');
+    
+    let screenshot;
+    if (tableArea) {
+      screenshot = await tableArea.screenshot({ 
+        type: 'png',
+        quality: 90
+      });
     } else {
-      throw new Error('Erreur lors de la génération: ' + error.message);
+      // Capturer toute la page si la zone spécifique n'est pas trouvée
+      screenshot = await page.screenshot({ 
+        type: 'png',
+        quality: 90,
+        fullPage: true 
+      });
+    }
+    
+    console.log('✅ Capture réussie!');
+    return screenshot;
+
+  } catch (error) {
+    console.error('❌ Erreur lors de la génération:', error);
+    throw new Error('Erreur lors de la génération du tableau: ' + error.message);
+  } finally {
+    if (browser) {
+      await browser.close();
+      console.log('🔒 Navigateur fermé');
     }
   }
 }
@@ -60,7 +115,7 @@ client.on('messageCreate', async (message) => {
     try {
       console.log(`🔄 Traitement demande de ${message.author.tag}`);
       
-      const processingMsg = await message.reply('🔄 Génération du tableau en cours...');
+      const processingMsg = await message.reply('🔄 Génération du tableau en cours (cela peut prendre 10-15 secondes)...');
       
       // Extraire le texte du tableau
       const lines = message.content.split('\n');
@@ -73,7 +128,7 @@ client.on('messageCreate', async (message) => {
         return;
       }
 
-      console.log('📋 Texte à générer:', tableText.substring(0, 100) + '...');
+      console.log('📋 Texte à générer:', tableText);
       
       // Générer l'image
       const imageBuffer = await generateTableImage(tableText);
@@ -92,17 +147,7 @@ client.on('messageCreate', async (message) => {
       
     } catch (error) {
       console.error('❌ Erreur finale:', error);
-      
-      let errorMessage = '❌ **Erreur:** ' + error.message;
-      
-      // Suggestions selon l'erreur
-      if (error.message.includes('non trouvé') || error.message.includes('404')) {
-        errorMessage += '\n\n💡 **Solution:** Le site https://gb.hlorenzi.com/table pourrait être en maintenance.';
-      } else if (error.message.includes('format')) {
-        errorMessage += '\n\n💡 **Vérifiez le format de votre message.**';
-      }
-      
-      await message.reply(errorMessage);
+      await message.reply('❌ **Erreur:** ' + error.message + '\n\nLe site peut être temporairement indisponible.');
     }
   }
 });
