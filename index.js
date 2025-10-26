@@ -28,7 +28,8 @@ async function generateTableImage(tableText) {
         '--no-zygote',
         '--single-process',
         '--disable-gpu'
-      ]
+      ],
+      defaultViewport: { width: 1200, height: 800 }
     });
 
     const page = await browser.newPage();
@@ -40,53 +41,95 @@ async function generateTableImage(tableText) {
       timeout: 30000 
     });
 
-    console.log('📝 Recherche de la zone de texte...');
+    console.log('📝 Recherche de la zone de texte de gauche...');
     
-    // Attendre que la page soit chargée
-    await page.waitForTimeout(2000);
+    // Attendre que la page soit complètement chargée
+    await page.waitForTimeout(3000);
     
-    // Trouver le textarea (c'est généralement un textarea pour ce genre de site)
-    const textareaSelector = 'textarea';
+    // Trouver le textarea ou l'input de la zone de gauche
+    // Sur ce type de site, c'est souvent un textarea pour le code/texte
+    const textareaSelector = 'textarea, .input-area, .code-area, #input, [class*="input"], [class*="code"]';
     await page.waitForSelector(textareaSelector, { timeout: 10000 });
     
-    // Effacer le contenu existant
-    await page.evaluate((selector) => {
+    // Effacer le contenu existant et écrire le nouveau
+    console.log('📋 Écriture du contenu...');
+    await page.evaluate((selector, text) => {
       const textarea = document.querySelector(selector);
       if (textarea) {
-        textarea.value = '';
+        textarea.value = text;
         textarea.focus();
+        
+        // Déclencher les événements de changement
+        const event = new Event('input', { bubbles: true });
+        textarea.dispatchEvent(event);
+        
+        const changeEvent = new Event('change', { bubbles: true );
+        textarea.dispatchEvent(changeEvent);
       }
-    }, textareaSelector);
+    }, textareaSelector, tableText);
     
-    // Coller le texte du tableau
-    console.log('📋 Collage du contenu...');
-    await page.type(textareaSelector, tableText);
+    // Attendre que le tableau soit généré à droite
+    console.log('⏳ Attente de la génération du tableau...');
+    await page.waitForTimeout(3000);
     
-    // Attendre un peu pour être sûr que le texte est bien saisi
-    await page.waitForTimeout(1000);
+    // Chercher la zone du tableau à droite
+    console.log('🔍 Recherche de la zone du tableau...');
     
-    // Prendre une capture d'écran de la zone du tableau
-    console.log('📸 Capture de la zone du tableau...');
+    // Sélecteurs possibles pour la zone de droite
+    const outputSelectors = [
+      '.table-container',
+      '.output',
+      '.result',
+      '.table-area',
+      '.right-panel',
+      '[class*="output"]',
+      '[class*="result"]',
+      '[class*="table"]',
+      'canvas',
+      'svg',
+      '.generated-table'
+    ];
     
-    // Essayer de trouver la zone spécifique du tableau, sinon capturer toute la page
-    const tableArea = await page.$('.table-container, .output, canvas, #output');
+    let tableElement = null;
+    for (const selector of outputSelectors) {
+      tableElement = await page.$(selector);
+      if (tableElement) {
+        console.log(`✅ Zone tableau trouvée avec: ${selector}`);
+        break;
+      }
+    }
     
     let screenshot;
-    if (tableArea) {
-      screenshot = await tableArea.screenshot({ 
+    if (tableElement) {
+      // Capturer seulement la zone du tableau
+      console.log('📸 Capture de la zone du tableau...');
+      screenshot = await tableElement.screenshot({ 
         type: 'png',
         quality: 90
       });
     } else {
-      // Capturer toute la page si la zone spécifique n'est pas trouvée
-      screenshot = await page.screenshot({ 
+      // Si on ne trouve pas la zone spécifique, capturer la moitié droite de la page
+      console.log('📸 Capture de la moitié droite...');
+      const pageSize = await page.evaluate(() => {
+        return {
+          width: document.documentElement.scrollWidth,
+          height: document.documentElement.scrollHeight
+        };
+      });
+      
+      screenshot = await page.screenshot({
         type: 'png',
         quality: 90,
-        fullPage: true 
+        clip: {
+          x: pageSize.width / 2,
+          y: 0,
+          width: pageSize.width / 2,
+          height: pageSize.height
+        }
       });
     }
     
-    console.log('✅ Capture réussie!');
+    console.log('✅ Tableau généré avec succès!');
     return screenshot;
 
   } catch (error) {
@@ -115,7 +158,7 @@ client.on('messageCreate', async (message) => {
     try {
       console.log(`🔄 Traitement demande de ${message.author.tag}`);
       
-      const processingMsg = await message.reply('🔄 Génération du tableau en cours (cela peut prendre 10-15 secondes)...');
+      const processingMsg = await message.reply('🔄 Génération du tableau en cours (10-15 secondes)...');
       
       // Extraire le texte du tableau
       const lines = message.content.split('\n');
@@ -124,7 +167,7 @@ client.on('messageCreate', async (message) => {
       
       // Vérification du format
       if (!tableText) {
-        await processingMsg.edit('❌ **Format incorrect!**\n\n**Exemple d\'utilisation:**\n```/maketable\nTag1 - Équipe Rouge\nJoueur1 1500\nJoueur2 1400\nJoueur3 1300\n\nTag2 - Équipe Bleue\nJoueur4 1500\nJoueur5 1400\nJoueur6 1300```');
+        await processingMsg.edit('❌ **Format incorrect!**\n\n**Exemple:**\n```/maketable\nTag1 - Équipe Rouge\nJoueur1 1500\nJoueur2 1400\n\nTag2 - Équipe Bleue\nJoueur3 1500\nJoueur4 1400```');
         return;
       }
 
@@ -147,7 +190,7 @@ client.on('messageCreate', async (message) => {
       
     } catch (error) {
       console.error('❌ Erreur finale:', error);
-      await message.reply('❌ **Erreur:** ' + error.message + '\n\nLe site peut être temporairement indisponible.');
+      await message.reply('❌ **Erreur:** ' + error.message);
     }
   }
 });
