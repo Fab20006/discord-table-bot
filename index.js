@@ -1,4 +1,5 @@
 const { Client, GatewayIntentBits } = require('discord.js');
+const axios = require('axios');
 
 console.log('🚀 Démarrage du bot...');
 
@@ -10,22 +11,78 @@ const client = new Client({
   ]
 });
 
+// Fonction pour générer l'image - NOUVELLE APPROCHE
+async function generateTableImage(tableText) {
+  try {
+    console.log('📊 Tentative de génération d\'image...');
+    
+    // Essayer différentes URLs d'API possibles
+    const attempts = [
+      {
+        name: 'API directe avec data',
+        url: 'https://gb.hlorenzi.com/api.png',
+        method: 'get',
+        params: { data: tableText }
+      },
+      {
+        name: 'API avec input', 
+        url: 'https://gb.hlorenzi.com/api.png',
+        method: 'get',
+        params: { input: tableText }
+      },
+      {
+        name: 'Endpoint generate',
+        url: 'https://gb.hlorenzi.com/generate',
+        method: 'post',
+        data: { data: tableText }
+      }
+    ];
+
+    for (let attempt of attempts) {
+      try {
+        console.log(`🔄 Essai: ${attempt.name}`);
+        
+        let response;
+        if (attempt.method === 'get') {
+          response = await axios.get(attempt.url, {
+            params: attempt.params,
+            responseType: 'arraybuffer',
+            timeout: 15000
+          });
+        } else {
+          response = await axios.post(attempt.url, attempt.data, {
+            responseType: 'arraybuffer', 
+            timeout: 15000
+          });
+        }
+
+        // Vérifier si on a bien une image PNG
+        if (response.data && response.data.length > 100) { // Image valide
+          console.log(`✅ Succès avec: ${attempt.name}`);
+          console.log(`📏 Taille image: ${response.data.length} bytes`);
+          return Buffer.from(response.data);
+        }
+        
+      } catch (error) {
+        console.log(`❌ Échec avec ${attempt.name}: ${error.message}`);
+      }
+    }
+
+    throw new Error('Aucune méthode de génération n\'a fonctionné');
+    
+  } catch (error) {
+    console.error('❌ Erreur génération image:', error);
+    throw error;
+  }
+}
+
 // Fonction pour valider le format
 function validateTableFormat(tableText) {
   const lines = tableText.split('\n').filter(line => line.trim() !== '');
-  
-  // Vérifier qu'il y a au moins 2 équipes et des joueurs
   const teamLines = lines.filter(line => line.includes('-'));
   if (teamLines.length < 2) {
     return '❌ **Format incorrect!** Il faut au moins 2 équipes.\nExemple: `Tag1 - NomÉquipe`';
   }
-  
-  // Vérifier qu'il y a des scores
-  const playerLines = lines.filter(line => !line.includes('-') && line.trim() !== '');
-  if (playerLines.length === 0) {
-    return '❌ **Aucun joueur trouvé!** Ajoutez des joueurs avec leurs scores.';
-  }
-  
   return null;
 }
 
@@ -44,39 +101,49 @@ client.on('messageCreate', async (message) => {
     try {
       console.log(`🔄 Traitement demande de ${message.author.tag}`);
       
-      const processingMsg = await message.reply('🔄 Traitement de votre tableau...');
+      const processingMsg = await message.reply('🔄 Génération du tableau en cours...');
       
       // Extraire le texte du tableau
       const lines = message.content.split('\n');
-      lines.shift(); // Retirer /maketable
+      lines.shift();
       const tableText = lines.join('\n').trim();
       
-      // Vérification basique
       if (!tableText) {
-        await processingMsg.edit('❌ **Message vide!**\n\n**Format requis:**\n```/maketable\nTag1 - Nom Équipe 1\nJoueur1 Score1\nJoueur2 Score2\n\nTag2 - Nom Équipe 2\nJoueur3 Score3\nJoueur4 Score4```');
+        await processingMsg.edit('❌ **Message vide!**\n\n**Format:**\n```/maketable\nTag1 - Nom1\nJ1 Score1\nJ2 Score2\n\nTag2 - Nom2\nJ3 Score3\nJ4 Score4```');
         return;
       }
 
-      // Validation du format
       const validationError = validateTableFormat(tableText);
       if (validationError) {
         await processingMsg.edit(validationError);
         return;
       }
 
-      console.log('📋 Tableau reçu:', tableText);
+      console.log('📋 Tableau à générer:', tableText);
       
-      // Pour l'instant, on va juste formatter le texte et le renvoyer
-      // En attendant de résoudre la génération d'image
+      // Essayer de générer l'image
+      try {
+        const imageBuffer = await generateTableImage(tableText);
+        
+        // Si on arrive ici, l'image a été générée !
+        await message.channel.send({
+          content: `📊 Tableau généré pour ${message.author}`,
+          files: [{ 
+            attachment: imageBuffer, 
+            name: 'tableau.png' 
+          }]
+        });
+        
+        console.log('✅ Image envoyée avec succès!');
+        
+      } catch (imageError) {
+        // Si la génération d'image échoue, envoyer le texte formaté
+        console.log('🔄 Génération image échouée, envoi du texte...');
+        const formattedTable = `📊 **Tableau pour ${message.author}**\n\`\`\`\n${tableText}\n\`\`\`\n\n*❌ Génération d'image temporairement indisponible*`;
+        await message.channel.send(formattedTable);
+      }
       
-      const formattedTable = `📊 **Tableau généré pour ${message.author}**\n\`\`\`\n${tableText}\n\`\`\`\n\n*⚠️ La génération d\'image est temporairement désactivée*`;
-      
-      await message.channel.send(formattedTable);
-      
-      // Supprimer le message "en cours"
       await processingMsg.delete();
-      
-      console.log('✅ Tableau envoyé avec succès');
       
     } catch (error) {
       console.error('❌ Erreur:', error);
