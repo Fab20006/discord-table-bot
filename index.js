@@ -11,62 +11,37 @@ const client = new Client({
   ]
 });
 
-// Fonction pour générer l'image du tableau (CORRIGÉE)
+// Fonction pour générer l'image - VERSION CORRECTE
 async function generateTableImage(tableText) {
   try {
     console.log('📊 Génération du tableau...');
-    console.log('Texte envoyé:', tableText);
     
-    // URL corrigée - celle du site web directement
-    const response = await axios.post('https://gb.hlorenzi.com/generate', 
-      { input: tableText },  // Le paramètre peut être différent
-      {
-        responseType: 'arraybuffer',
-        timeout: 30000,
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
+    // URL directe de l'API de génération
+    const response = await axios.get('https://gb.hlorenzi.com/api.png', {
+      params: {
+        data: tableText
+      },
+      responseType: 'arraybuffer',
+      timeout: 30000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
       }
-    );
+    });
 
-    console.log('✅ Tableau généré avec succès');
+    console.log('✅ Tableau généré avec succès!');
     return Buffer.from(response.data);
+    
   } catch (error) {
     console.error('❌ Erreur API:', error.message);
-    console.error('Status:', error.response?.status);
-    console.error('URL:', error.config?.url);
-    throw new Error('Impossible de générer le tableau. Vérifiez le format de votre message.');
-  }
-}
-
-// Version alternative si l'API POST ne fonctionne pas
-async function generateTableImageAlternative(tableText) {
-  try {
-    console.log('📊 Tentative avec méthode alternative...');
     
-    // Essayer avec FormData comme sur le site web
-    const FormData = require('form-data');
-    const form = new FormData();
-    form.append('input', tableText);
-    
-    const response = await axios.post('https://gb.hlorenzi.com/generate', 
-      form,
-      {
-        responseType: 'arraybuffer',
-        timeout: 30000,
-        headers: {
-          ...form.getHeaders(),
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-      }
-    );
-
-    console.log('✅ Tableau généré avec succès (méthode alternative)');
-    return Buffer.from(response.data);
-  } catch (error) {
-    console.error('❌ Erreur méthode alternative:', error.message);
-    throw error;
+    // Message d'erreur plus détaillé
+    if (error.response?.status === 404) {
+      throw new Error('Service de génération non trouvé. Le site peut avoir changé.');
+    } else if (error.code === 'ECONNREFUSED') {
+      throw new Error('Impossible de se connecter au service de génération.');
+    } else {
+      throw new Error('Erreur lors de la génération: ' + error.message);
+    }
   }
 }
 
@@ -87,34 +62,47 @@ client.on('messageCreate', async (message) => {
       
       const processingMsg = await message.reply('🔄 Génération du tableau en cours...');
       
+      // Extraire le texte du tableau
       const lines = message.content.split('\n');
-      lines.shift();
+      lines.shift(); // Retirer /maketable
       const tableText = lines.join('\n').trim();
       
+      // Vérification du format
       if (!tableText) {
-        await processingMsg.edit('❌ **Format incorrect!**\n\n**Exemple:**\n```/maketable\nTag1 - Équipe Rouge\nJoueur1 1500\nJoueur2 1400\n\nTag2 - Équipe Bleue\nJoueur3 1500\nJoueur4 1400```');
+        await processingMsg.edit('❌ **Format incorrect!**\n\n**Exemple d\'utilisation:**\n```/maketable\nTag1 - Équipe Rouge\nJoueur1 1500\nJoueur2 1400\nJoueur3 1300\n\nTag2 - Équipe Bleue\nJoueur4 1500\nJoueur5 1400\nJoueur6 1300```');
         return;
       }
 
-      // Essayer la méthode principale d'abord, puis l'alternative
-      let imageBuffer;
-      try {
-        imageBuffer = await generateTableImage(tableText);
-      } catch (firstError) {
-        console.log('🔄 Essai méthode alternative...');
-        imageBuffer = await generateTableImageAlternative(tableText);
-      }
+      console.log('📋 Texte à générer:', tableText.substring(0, 100) + '...');
       
+      // Générer l'image
+      const imageBuffer = await generateTableImage(tableText);
+      
+      // Envoyer l'image
       await message.channel.send({
         content: `📊 Tableau généré pour ${message.author}`,
-        files: [{ attachment: imageBuffer, name: 'tableau.png' }]
+        files: [{ 
+          attachment: imageBuffer, 
+          name: 'tableau.png' 
+        }]
       });
       
+      // Supprimer le message "en cours"
       await processingMsg.delete();
       
     } catch (error) {
       console.error('❌ Erreur finale:', error);
-      await message.reply('❌ **Erreur:** ' + error.message + '\n\nVérifiez le format de votre message.');
+      
+      let errorMessage = '❌ **Erreur:** ' + error.message;
+      
+      // Suggestions selon l'erreur
+      if (error.message.includes('non trouvé') || error.message.includes('404')) {
+        errorMessage += '\n\n💡 **Solution:** Le site https://gb.hlorenzi.com/table pourrait être en maintenance.';
+      } else if (error.message.includes('format')) {
+        errorMessage += '\n\n💡 **Vérifiez le format de votre message.**';
+      }
+      
+      await message.reply(errorMessage);
     }
   }
 });
