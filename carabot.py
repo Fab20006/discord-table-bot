@@ -1,370 +1,199 @@
 import discord
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.action_chains import ActionChains
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support.ui import Select
-from selenium.webdriver.chrome.service import Service
-import io
+import aiohttp
 import asyncio
-import time
+import io
 import os
-import requests
-from urllib.parse import urljoin
 import base64
+import json
+from urllib.parse import urlencode
 
 # Configuration pour Render
 token = os.environ.get('DISCORD_TOKEN')
 if not token:
     raise Exception("❌ DISCORD_TOKEN non trouvé dans les variables d'environnement")
 
-short_wait_time = 0.2
-long_wait_time = 2
-
 client = discord.Client(intents=discord.Intents.all())
 
-def setup_chrome_options():
-    """Configure Chrome pour Render"""
-    chrome_options = Options()
+class TableGenerator:
+    def __init__(self):
+        self.base_url = "https://gb2.hlorenzi.com"
+        self.session = None
     
-    # Configuration pour Render
-    chrome_options.add_argument('--no-sandbox')
-    chrome_options.add_argument('--disable-dev-shm-usage')
-    chrome_options.add_argument('--headless=new')
-    chrome_options.add_argument('--disable-gpu')
-    chrome_options.add_argument('--window-size=1400,1000')
-    chrome_options.add_argument('--font-render-hinting=none')
-    chrome_options.add_argument('--disable-features=VizDisplayCompositor')
+    async def ensure_session(self):
+        if not self.session:
+            self.session = aiohttp.ClientSession()
     
-    # Configuration polices
-    prefs = {
-        'webkit.webprefs.default_font_size': 16,
-        'webkit.webprefs.default_fixed_font_size': 13,
-        'webkit.webprefs.minimum_font_size': 6,
-        'webkit.webprefs.minimum_logical_font_size': 6,
-        'webkit.webprefs.fonts': {
-            'standard': 'Arial',
-            'serif': 'Times New Roman', 
-            'sansserif': 'Arial',
-            'fixed': 'Courier New',
-        }
-    }
-    chrome_options.add_experimental_option('prefs', prefs)
+    async def close(self):
+        if self.session:
+            await self.session.close()
     
-    return chrome_options
-
-def download_table_image(driver):
-    """Télécharge directement l'image du tableau depuis son URL"""
-    try:
-        print("🔍 Recherche de l'image du tableau...")
-        
-        images = driver.find_elements(By.CSS_SELECTOR, "img")
-        
-        for img in images:
-            if img.is_displayed():
-                width = img.size['width']
-                height = img.size['height']
-                
-                if width > 100 and height > 50:
-                    src = img.get_attribute('src')
-                    print("✅ Image du tableau trouvée")
-                    
-                    # URL absolue
-                    if src and src.startswith('http'):
-                        response = requests.get(src, timeout=10)
-                        if response.status_code == 200:
-                            print("📥 Image téléchargée depuis URL")
-                            return response.content
-                    
-                    # URL relative
-                    elif src and src.startswith('/'):
-                        full_url = urljoin(driver.current_url, src)
-                        response = requests.get(full_url, timeout=10)
-                        if response.status_code == 200:
-                            print("📥 Image téléchargée depuis URL relative")
-                            return response.content
-                    
-                    # Base64
-                    elif src and src.startswith('data:image/'):
-                        print("📥 Image en base64 détectée")
-                        base64_data = src.split(',')[1]
-                        image_data = base64.b64decode(base64_data)
-                        return image_data
-        
-        # Méthode de secours
-        print("❌ Téléchargement direct échoué, capture par screenshot")
-        return capture_table_fallback(driver)
-        
-    except Exception as e:
-        print(f"❌ Erreur téléchargement image: {e}")
-        return capture_table_fallback(driver)
-
-def capture_table_fallback(driver):
-    """Méthode de secours : capture par screenshot"""
-    try:
-        print("🔍 Capture par screenshot...")
-        
-        images = driver.find_elements(By.CSS_SELECTOR, "img")
-        
-        for img in images:
-            if img.is_displayed():
-                width = img.size['width']
-                height = img.size['height']
-                
-                if width > 100 and height > 50:
-                    print(f"✅ Tableau trouvé: {width}x{height}")
-                    return img.screenshot_as_png
-        
-        return driver.get_screenshot_as_png()
-                
-    except Exception as e:
-        print(f"❌ Erreur capture: {e}")
-        return driver.get_screenshot_as_png()
-
-def close_popup(driver):
-    """Ferme les pop-ups de consentement"""
-    try:
-        buttons = driver.find_elements(By.CSS_SELECTOR, "button")
-        
-        for button in buttons:
-            if button.is_displayed():
-                button_text = button.text.lower()
-                if any(word in button_text for word in ['accept', 'agree', 'ok', 'consent']):
-                    button.click()
-                    print("✅ Pop-up fermé")
-                    time.sleep(short_wait_time)
-                    return True
-    except:
-        pass
-    return False
-
-def close_modal_popup(driver):
-    """Ferme les popups modaux"""
-    try:
-        actions = ActionChains(driver)
-        actions.send_keys(Keys.ESCAPE).perform()
-        print("✅ Popup fermé")
-        time.sleep(short_wait_time)
-        return True
-    except:
-        pass
-    return False
-
-def find_and_click_customize(driver):
-    """Trouve et clique sur le bouton Customize"""
-    try:
-        buttons = driver.find_elements(By.CSS_SELECTOR, "button.go1782636986.accent")
-        
-        for button in buttons:
-            if button.is_displayed():
-                button.click()
-                time.sleep(short_wait_time)
-                return True
-    except Exception as e:
-        print(f"❌ Erreur Customize: {e}")
-    return False
-
-def find_and_click_manage_styles(driver):
-    """Trouve et clique sur Manage styles"""
-    try:
-        buttons = driver.find_elements(By.CSS_SELECTOR, "button[title='Manage styles']")
-        
-        for button in buttons:
-            if button.is_displayed():
-                button.click()
-                time.sleep(short_wait_time)
-                return True
-    except Exception as e:
-        print(f"❌ Erreur Manage styles: {e}")
-    return False
-
-def find_and_click_import(driver):
-    """Trouve et clique sur Import"""
-    try:
-        all_buttons = driver.find_elements(By.CSS_SELECTOR, "button")
-        
-        for button in all_buttons:
-            if button.is_displayed() and "import" in button.text.lower():
-                button.click()
-                time.sleep(short_wait_time)
-                return True
-    except Exception as e:
-        print(f"❌ Erreur Import: {e}")
-    return False
-
-def upload_json_file(driver):
-    """Upload le fichier JSON"""
-    try:
-        file_inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='file']")
-        
-        for file_input in file_inputs:
-            if file_input.is_displayed() or file_input.is_enabled():
-                file_path = os.path.abspath("ztix.json")
-                
-                if os.path.exists(file_path):
-                    file_input.send_keys(file_path)
-                    print("✅ Fichier uploadé")
-                    time.sleep(short_wait_time)
+    async def get_csrf_token(self):
+        """Récupère le token CSRF depuis la page"""
+        try:
+            async with self.session.get(f"{self.base_url}/table") as response:
+                html = await response.text()
+                # Cherche le token CSRF dans le HTML
+                if 'name="csrf-token"' in html:
+                    start = html.find('name="csrf-token"') 
+                    start = html.find('content="', start) + 9
+                    end = html.find('"', start)
+                    return html[start:end]
+                return None
+        except Exception as e:
+            print(f"❌ Erreur CSRF token: {e}")
+            return None
+    
+    async def import_styles(self):
+        """Importe les styles Ztix via l'API"""
+        try:
+            # Charge le fichier JSON
+            with open("ztix.json", "r", encoding="utf-8") as f:
+                styles_data = json.load(f)
+            
+            csrf_token = await self.get_csrf_token()
+            
+            headers = {
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+            
+            if csrf_token:
+                headers['X-CSRF-TOKEN'] = csrf_token
+            
+            # Essaye d'importer via l'API
+            async with self.session.post(
+                f"{self.base_url}/api/styles/import",
+                json=styles_data,
+                headers=headers
+            ) as response:
+                if response.status == 200:
+                    print("✅ Styles importés avec succès")
                     return True
                 else:
-                    print(f"❌ Fichier {file_path} non trouvé")
+                    print(f"⚠️ Import API échoué: {response.status}")
                     return False
-    except Exception as e:
-        print(f"❌ Erreur upload: {e}")
-    return False
-
-def handle_alert(driver):
-    """Gère les alertes"""
-    try:
-        alert = driver.switch_to.alert
-        alert_text = alert.text
-        
-        if "Successfully imported" in alert_text:
-            alert.accept()
-            print("✅ Alerte acceptée")
-            return True
-    except:
-        pass
-    return False
-
-def find_and_select_ztix(driver):
-    """Trouve et sélectionne le style Ztix"""
-    try:
-        comboboxes = driver.find_elements(By.CSS_SELECTOR, "select")
-        
-        for combobox in comboboxes:
-            if combobox.is_displayed():
-                select = Select(combobox)
-                select.select_by_visible_text("Ztix")
-                print("✅ Ztix sélectionné")
-                time.sleep(0.5)
-                return True
-    except Exception as e:
-        print(f"❌ Erreur sélection Ztix: {e}")
-    return False
-
-def import_json_styles(driver):
-    """Importe le fichier JSON de styles"""
-    print("🔄 Import styles JSON...")
-    
-    try:
-        if not find_and_click_customize(driver):
-            return False
-        
-        if not find_and_click_manage_styles(driver):
-            return False
-        
-        if not find_and_click_import(driver):
-            return False
-        
-        if not upload_json_file(driver):
-            return False
-        
-        handle_alert(driver)
-        close_modal_popup(driver)
-        
-        print("✅ Import terminé")
-        return True
-        
-    except Exception as e:
-        print(f"❌ Erreur import: {e}")
-        return False
-
-def select_ztix_style(driver):
-    """Sélectionne le style Ztix"""
-    print("🎨 Sélection style Ztix...")
-    
-    try:
-        if not find_and_click_customize(driver):
-            return False
-        
-        style_selected = find_and_select_ztix(driver)
-        
-        if style_selected:
-            close_modal_popup(driver)
-        
-        return style_selected
-        
-    except Exception as e:
-        print(f"❌ Erreur sélection style: {e}")
-        return False
-
-def generate_table_image(table_text):
-    driver = None
-    try:
-        print("🌐 Démarrage navigateur...")
-
-        chrome_options = setup_chrome_options()
-        
-        # Utilisation de ChromeDriver avec service
-        service = Service()
-        driver = webdriver.Chrome(service=service, options=chrome_options)
-
-        driver.execute_script("""
-            var style = document.createElement('style');
-            style.textContent = `* { font-family: Arial, Helvetica, sans-serif !important; }`;
-            document.head.appendChild(style);
-        """)
-        
-        print("📡 Navigation...")
-        driver.get("https://gb2.hlorenzi.com/table")
-        
-        print("⏳ Chargement...")
-        time.sleep(short_wait_time)
-        
-        close_popup(driver)
-        
-        print("🔄 Application styles...")
-        import_success = import_json_styles(driver)
-        
-        if import_success:
-            style_selected = select_ztix_style(driver)
-            if not style_selected:
-                print("⚠️ Style par défaut")
-        else:
-            print("⚠️ Import échoué")
-        
-        print("📝 Génération tableau...")
-        try:
-            textarea = driver.find_element(By.CSS_SELECTOR, "textarea")
-            if textarea.is_displayed():
-                textarea.click()
-                time.sleep(short_wait_time)
-                
-                actions = ActionChains(driver)
-                actions.key_down(Keys.COMMAND).send_keys('a').key_up(Keys.COMMAND).perform()
-                time.sleep(0.05)
-                actions.send_keys(Keys.DELETE).perform()
-                time.sleep(0.05)
-                actions.send_keys(table_text).perform()
-                time.sleep(short_wait_time)
+                    
         except Exception as e:
-            print(f"❌ Erreur textarea: {e}")
-            raise Exception("Erreur zone de texte")
-        
-        print("⏳ Génération...")
-        time.sleep(long_wait_time)
-        
-        image_data = download_table_image(driver)
-        print("✅ Tableau récupéré!")
-        return image_data
-        
-    except Exception as e:
-        print(f"❌ Erreur: {e}")
-        raise Exception(f"Erreur génération: {str(e)}")
+            print(f"⚠️ Erreur import styles: {e}")
+            return False
     
-    finally:
-        if driver:
-            driver.quit()
-            print("🔒 Navigateur fermé")
+    async def apply_ztix_style(self):
+        """Applique le style Ztix"""
+        try:
+            csrf_token = await self.get_csrf_token()
+            
+            headers = {
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+            
+            if csrf_token:
+                headers['X-CSRF-TOKEN'] = csrf_token
+            
+            data = {
+                'style': 'Ztix'
+            }
+            
+            async with self.session.post(
+                f"{self.base_url}/api/styles/apply",
+                json=data,
+                headers=headers
+            ) as response:
+                if response.status == 200:
+                    print("✅ Style Ztix appliqué")
+                    return True
+                else:
+                    print(f"⚠️ Application style échouée: {response.status}")
+                    return False
+                    
+        except Exception as e:
+            print(f"⚠️ Erreur application style: {e}")
+            return False
+    
+    async def generate_table_image(self, table_text):
+        """Génère l'image du tableau via l'API"""
+        try:
+            await self.ensure_session()
+            
+            print("🔄 Configuration des styles...")
+            await self.import_styles()
+            await self.apply_ztix_style()
+            
+            print("📊 Génération du tableau...")
+            
+            # Méthode 1: Essaye l'API directe
+            payload = {
+                'text': table_text,
+                'style': 'Ztix',
+                'format': 'png'
+            }
+            
+            headers = {
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+            
+            # Essaye l'endpoint API principal
+            async with self.session.post(
+                f"{self.base_url}/api/generate",
+                json=payload,
+                headers=headers,
+                timeout=30
+            ) as response:
+                
+                if response.status == 200:
+                    content_type = response.headers.get('Content-Type', '')
+                    
+                    if 'image' in content_type:
+                        # Réponse directe image
+                        image_data = await response.read()
+                        print("✅ Image générée via API")
+                        return image_data
+                    else:
+                        # Réponse JSON avec image base64
+                        result = await response.json()
+                        if 'image' in result and result['image']:
+                            base64_data = result['image'].split(',')[1]
+                            image_data = base64.b64decode(base64_data)
+                            print("✅ Image générée via API base64")
+                            return image_data
+            
+            # Méthode 2: Fallback - requête GET avec paramètres
+            print("🔄 Tentative méthode alternative...")
+            
+            params = {
+                'text': table_text,
+                'style': 'Ztix'
+            }
+            
+            async with self.session.get(
+                f"{self.base_url}/render",
+                params=params,
+                timeout=30
+            ) as response:
+                
+                if response.status == 200:
+                    image_data = await response.read()
+                    print("✅ Image générée via render")
+                    return image_data
+            
+            # Si toutes les méthodes échouent
+            raise Exception("Aucune méthode de génération n'a fonctionné")
+            
+        except asyncio.TimeoutError:
+            raise Exception("Timeout - le service de génération est trop lent")
+        except Exception as e:
+            raise Exception(f"Erreur génération: {str(e)}")
+
+# Instance globale du générateur
+table_gen = TableGenerator()
 
 @client.event
 async def on_message(message: discord.Message):
     if message.author.bot:
         return
     
-    elif message.content.lower().startswith("maketable"):
+    if message.content.lower().startswith("maketable"):
         try:
             table_text = message.content[len("maketable"):].strip()
             
@@ -372,34 +201,66 @@ async def on_message(message: discord.Message):
                 await message.channel.send("❌ **Veuillez fournir le texte du tableau!**")
                 return
             
-            processing_msg = await message.channel.send("🔄 Génération en cours...")
+            # Vérification longueur
+            if len(table_text) > 2000:
+                await message.channel.send("❌ **Le texte est trop long! Maximum 2000 caractères.**")
+                return
             
-            def generate_image():
-                return generate_table_image(table_text)
+            processing_msg = await message.channel.send("🔄 Génération en cours... (version HTTP optimisée)")
             
-            image_data = await asyncio.get_event_loop().run_in_executor(None, generate_image)
-            
-            image_file = discord.File(io.BytesIO(image_data), filename="tableau.png")
-            
-            await message.channel.send(
-                content=f"📊 Tableau généré pour {message.author.mention}",
-                file=image_file
-            )
-            
-            await processing_msg.delete()
+            try:
+                # Génération avec timeout
+                image_data = await asyncio.wait_for(
+                    table_gen.generate_table_image(table_text),
+                    timeout=45.0
+                )
+                
+                # Création du fichier Discord
+                image_file = discord.File(
+                    io.BytesIO(image_data), 
+                    filename="tableau.png"
+                )
+                
+                await message.channel.send(
+                    content=f"📊 Tableau généré pour {message.author.mention}",
+                    file=image_file
+                )
+                
+                await processing_msg.delete()
+                
+            except asyncio.TimeoutError:
+                await message.channel.send("❌ **Timeout - la génération a pris trop de temps**")
+            except Exception as e:
+                await message.channel.send(f"❌ **Erreur de génération:** {str(e)}")
             
         except Exception as e:
-            error_msg = f"❌ Erreur: {str(e)}"
-            await message.channel.send(error_msg)
-            print(f"Erreur détaillée: {e}")
+            await message.channel.send(f"❌ **Erreur:** {str(e)}")
+    
     elif message.content.lower() == "!ping":
-        await message.channel.send("🏓 Pong! Bot actif")
+        await message.channel.send("🏓 Pong! Bot HTTP actif - Version optimisée Render")
+    
+    elif message.content.lower() == "!status":
+        await message.channel.send("✅ Bot fonctionnel - Méthode HTTP sans Selenium")
 
 @client.event
 async def on_ready():
-    print(f'✅ Bot connecté en tant que {client.user}')
-    print(f'✅ Serveur Render - Prêt à générer des tableaux!')
+    print(f'✅ Bot HTTP connecté en tant que {client.user}')
+    print(f'🚀 Version optimisée pour Render - Prêt!')
+
+@client.event
+async def on_disconnect():
+    await table_gen.close()
+
+async def main():
+    await client.start(token)
 
 if __name__ == "__main__":
-    print("🚀 Démarrage du bot Discord sur Render...")
-    client.run(token)
+    print("🚀 Démarrage du bot Discord HTTP sur Render...")
+    
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("🛑 Arrêt du bot...")
+    finally:
+        # Nettoyage propre
+        asyncio.run(table_gen.close())
