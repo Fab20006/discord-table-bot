@@ -1,10 +1,8 @@
 services:
   - type: web
-    name: discord-table-bot
+    name: discord-table-bot-python
     env: python
-    buildCommand: |
-      pip install -r requirements.txt
-      playwright install chromium
+    buildCommand: pip install -r requirements.txt
     startCommand: python bot.py
     envVars:
       - key: DISCORD_TOKEN

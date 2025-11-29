@@ -1,14 +1,11 @@
 import discord
 from discord import Intents
-import asyncio
 import os
+import asyncio
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
-import base64
+import io
 
 # Configuration du bot
 intents = Intents.default()
@@ -17,29 +14,26 @@ client = discord.Client(intents=intents)
 
 def validate_table_format(table_text):
     """Valide le format du tableau"""
+    if not table_text or not table_text.strip():
+        return "❌ **Message vide!**"
+    
     lines = [line.strip() for line in table_text.split('\n') if line.strip()]
     team_lines = [line for line in lines if '-' in line]
     
     if len(team_lines) < 1:
         return "❌ **Format incorrect!** Il faut au moins 1 équipe.\nExemple: `Tag - NomÉquipe`"
     
-    player_lines = [line for line in lines if '-' not in line and line.strip()]
-    if len(player_lines) == 0:
-        return "❌ **Aucun joueur trouvé!** Format: `Joueur Score`"
-    
     return None
 
-def generate_table_with_selenium(table_text):
-    """Génère le tableau avec Selenium"""
+def generate_table_screenshot(table_text):
+    """Génère une capture d'écran du tableau"""
     driver = None
     try:
-        print("🌐 Configuration de Chrome...")
+        print("🌐 Configuration du navigateur...")
         
-        # Options Chrome pour Render
         chrome_options = Options()
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
-        chrome_options.add_argument('--disable-gpu')
         chrome_options.add_argument('--headless')
         chrome_options.add_argument('--window-size=1200,800')
         
@@ -48,46 +42,40 @@ def generate_table_with_selenium(table_text):
         print("📡 Navigation vers gb2.hlorenzi.com/table...")
         driver.get("https://gb2.hlorenzi.com/table")
         
-        # Attendre le chargement
-        print("⏳ Attente du chargement...")
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.TAG_NAME, "body"))
-        )
+        # Attendre un peu
+        driver.implicitly_wait(5)
         
-        # Chercher la zone de texte
+        # Chercher et remplir la zone de texte
         print("🔍 Recherche de la zone de texte...")
-        textarea_selectors = [
-            "textarea",
-            "input[type='text']",
-            "input[type='textarea']",
-            ".input",
-            "#input",
-            "[contenteditable='true']"
-        ]
-        
         textarea = None
-        for selector in textarea_selectors:
+        
+        # Essayer différents sélecteurs
+        selectors = ["textarea", "input[type='text']", ".input", "#input"]
+        for selector in selectors:
             try:
                 textarea = driver.find_element(By.CSS_SELECTOR, selector)
                 if textarea:
-                    print(f"✅ Zone trouvée avec: {selector}")
+                    print(f"✅ Trouvé avec: {selector}")
                     break
             except:
                 continue
         
         if not textarea:
-            raise Exception("Aucune zone de texte trouvée")
+            # Prendre une capture de la page telle quelle
+            print("⚠️ Zone de texte non trouvée, capture de la page...")
+            screenshot = driver.get_screenshot_as_png()
+            return screenshot
         
-        # Effacer et écrire le texte
-        print("📝 Écriture du tableau...")
+        # Remplir le texte
+        print("📝 Remplissage du tableau...")
         textarea.clear()
         textarea.send_keys(table_text)
         
         # Attendre la génération
         print("⏳ Attente de la génération...")
-        driver.implicitly_wait(5)
+        driver.implicitly_wait(3)
         
-        # Prendre une capture
+        # Prendre la capture
         print("📸 Capture d'écran...")
         screenshot = driver.get_screenshot_as_png()
         
@@ -95,8 +83,8 @@ def generate_table_with_selenium(table_text):
         return screenshot
         
     except Exception as e:
-        print(f"❌ Erreur Selenium: {e}")
-        raise Exception(f"Erreur génération: {str(e)}")
+        print(f"❌ Erreur: {e}")
+        raise Exception(f"Erreur lors de la génération: {str(e)}")
     
     finally:
         if driver:
@@ -106,7 +94,8 @@ def generate_table_with_selenium(table_text):
 @client.event
 async def on_ready():
     print(f'✅ Bot connecté en tant que {client.user}')
-    await client.change_presence(activity=discord.Game(name="/maketable"))
+    activity = discord.Game(name="/maketable")
+    await client.change_presence(activity=activity)
 
 @client.event
 async def on_message(message):
@@ -115,50 +104,43 @@ async def on_message(message):
     
     if message.content.startswith('/maketable'):
         try:
-            print(f"🔄 Traitement demande de {message.author}")
+            print(f"🔄 Demande de {message.author}")
             
-            processing_msg = await message.reply("🔄 Interaction avec gb2.hlorenzi.com... (10-15 secondes)")
+            # Message de traitement
+            processing_msg = await message.reply("🔄 Génération en cours...")
             
             # Extraire le texte
-            lines = message.content.split('\n')[1:]  # Retirer /maketable
-            table_text = '\n'.join(lines).strip()
-            
-            # Validation
-            if not table_text:
-                await processing_msg.edit("❌ **Message vide!**\n\n**Format:**\n```/maketable\nA - Équipe Rouge\nJoueur1 1500\nJoueur2 1400\n\nB - Équipe Bleue\nJoueur3 1500\nJoueur4 1400```")
+            content = message.content.replace('/maketable', '').strip()
+            if not content:
+                await processing_msg.edit("❌ **Format incorrect!**\n\nExemple:\n```/maketable\nA - Équipe Rouge\nJ1 1500\nJ2 1400\n\nB - Équipe Bleue\nJ3 1500\nJ4 1400```")
                 return
             
-            validation_error = validate_table_format(table_text)
-            if validation_error:
-                await processing_msg.edit(validation_error)
+            # Valider le format
+            error = validate_table_format(content)
+            if error:
+                await processing_msg.edit(error)
                 return
-            
-            print(f"📋 Génération: {table_text}")
             
             # Générer l'image
-            image_data = generate_table_with_selenium(table_text)
+            image_data = generate_table_screenshot(content)
             
-            # Envoyer l'image
+            # Créer le fichier Discord
             from io import BytesIO
-            image_file = discord.File(BytesIO(image_data), filename="tableau.png")
+            image_file = discord.File(io.BytesIO(image_data), filename="tableau.png")
             
+            # Envoyer le résultat
             await message.channel.send(
-                content=f"📊 Tableau généré depuis gb2.hlorenzi.com pour {message.author.mention}",
+                content=f"📊 Tableau pour {message.author.mention}",
                 file=image_file
             )
             
+            # Supprimer le message de traitement
             await processing_msg.delete()
-            print("✅ Tableau envoyé!")
             
         except Exception as e:
-            print(f"❌ Erreur: {e}")
-            
-            # En cas d'erreur, envoyer le texte
-            lines = message.content.split('\n')[1:]
-            table_text = '\n'.join(lines).strip()
-            
-            error_msg = f"❌ **Erreur avec gb2.hlorenzi.com**\n\n{str(e)}\n\n**Votre tableau:**\n```\n{table_text}\n```"
+            error_msg = f"❌ Erreur: {str(e)}"
             await message.reply(error_msg)
+            print(f"❌ Erreur finale: {e}")
 
 # Lancer le bot
 if __name__ == "__main__":
