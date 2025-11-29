@@ -392,6 +392,8 @@ async def on_message(message: discord.Message):
             error_msg = f"❌ Erreur: {str(e)}"
             await message.channel.send(error_msg)
             print(f"Erreur détaillée: {e}")
+    elif message.content.lower() == "!ping":
+        await message.channel.send("🏓 Pong! Bot actif")
 
 @client.event
 async def on_ready():
