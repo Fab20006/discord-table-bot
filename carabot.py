@@ -2,26 +2,27 @@ import discord
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.support.ui import Select
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 import io
 import asyncio
+import time
 import os
-import base64
 import requests
 from urllib.parse import urljoin
+import base64
 
 # Configuration pour Render
 token = os.environ.get('DISCORD_TOKEN')
 if not token:
     raise Exception("❌ DISCORD_TOKEN non trouvé dans les variables d'environnement")
 
-# Temps d'attente réduits
-short_wait_time = 0.1
-long_wait_time = 1
+# Temps d'attente optimisés pour Render
+short_wait_time = 0.15
+long_wait_time = 1.5
 
 client = discord.Client(intents=discord.Intents.all())
 
@@ -29,24 +30,21 @@ def setup_chrome_options():
     """Configuration Chrome optimisée pour Render"""
     chrome_options = Options()
     
-    # Configuration optimisée pour Render
+    # Configuration CRITIQUE pour Render
     chrome_options.add_argument('--headless=new')
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
     chrome_options.add_argument('--disable-gpu')
-    chrome_options.add_argument('--window-size=1200,800')  # Réduit pour plus de rapidité
+    chrome_options.add_argument('--window-size=1200,800')  # Réduit la taille
     chrome_options.add_argument('--disable-extensions')
-    chrome_options.add_argument('--disable-images')  # Désactive les images pour plus de vitesse
-    chrome_options.add_argument('--disable-javascript')  # À tester - peut accélérer
-    chrome_options.add_argument('--blink-settings=imagesEnabled=false')
+    chrome_options.add_argument('--disable-images')  # ACCÉLÉRATION IMPORTANTE
     
     # Optimisations performances
     chrome_options.add_argument('--disable-background-timer-throttling')
     chrome_options.add_argument('--disable-backgrounding-occluded-windows')
     chrome_options.add_argument('--disable-renderer-backgrounding')
-    chrome_options.add_argument('--memory-pressure-off')
     
-    # Configuration polices simplifiée
+    # Configuration polices
     prefs = {
         'profile.default_content_setting_values': {
             'images': 2,  # Désactive les images
@@ -57,56 +55,55 @@ def setup_chrome_options():
     
     return chrome_options
 
-def smart_wait(driver, condition, timeout=10):
-    """Attente intelligente avec timeout réduit"""
+def smart_wait(driver, condition, timeout=5):
+    """Attente intelligente avec timeout court"""
     try:
         wait = WebDriverWait(driver, timeout)
         return wait.until(condition)
     except:
         return None
 
-def download_table_image_fast(driver):
+def download_table_image(driver):
     """Version optimisée pour télécharger l'image"""
     try:
-        print("🔍 Recherche rapide de l'image...")
+        print("🔍 Recherche image...")
         
-        # Attendre que l'image soit présente mais pas trop longtemps
-        image = smart_wait(driver, EC.presence_of_element_located((By.TAG_NAME, "img")), 5)
+        # Attente courte pour l'image
+        image = smart_wait(driver, EC.presence_of_element_located((By.TAG_NAME, "img")), 3)
         
         if image and image.is_displayed():
             src = image.get_attribute('src')
-            print(f"✅ Image trouvée: {src[:100] if src else 'No src'}")
+            print("✅ Image trouvée")
             
             # Priorité: Base64 (le plus rapide)
             if src and src.startswith('data:image/'):
-                print("📥 Image base64 détectée")
+                print("📥 Image base64")
                 base64_data = src.split(',')[1]
                 return base64.b64decode(base64_data)
             
             # Fallback: Screenshot
-            print("📸 Capture par screenshot")
+            print("📸 Capture screenshot")
             return image.screenshot_as_png
         
-        # Dernier recours: screenshot de la page
-        print("🖼️ Screenshot de la page entière")
+        # Dernier recours
+        print("🖼️ Screenshot page")
         return driver.get_screenshot_as_png()
         
     except Exception as e:
-        print(f"❌ Erreur capture image: {e}")
+        print(f"❌ Erreur capture: {e}")
         return driver.get_screenshot_as_png()
 
 def close_popup_fast(driver):
     """Ferme les pop-ups rapidement"""
     try:
-        # Essayer Escape d'abord (le plus rapide)
+        # Escape d'abord
         actions = ActionChains(driver)
         actions.send_keys(Keys.ESCAPE).perform()
-        print("✅ Escape envoyé")
-        time.sleep(0.5)
+        time.sleep(0.3)
         
-        # Chercher les boutons rapidement
-        buttons = driver.find_elements(By.CSS_SELECTOR, "button")
-        for button in buttons[:5]:  # Seulement les 5 premiers
+        # Boutons rapidement
+        buttons = driver.find_elements(By.CSS_SELECTOR, "button")[:3]
+        for button in buttons:
             try:
                 if button.is_displayed():
                     text = button.text.lower()
@@ -118,42 +115,40 @@ def close_popup_fast(driver):
                 continue
         return False
     except Exception as e:
-        print(f"⚠️ Pop-up non fermé: {e}")
+        print(f"⚠️ Pop-up: {e}")
         return False
 
 def find_and_click_fast(driver, selector, description):
     """Trouve et clique rapidement"""
     try:
-        element = smart_wait(driver, EC.element_to_be_clickable((By.CSS_SELECTOR, selector)), 5)
+        element = smart_wait(driver, EC.element_to_be_clickable((By.CSS_SELECTOR, selector)), 3)
         if element:
             element.click()
             print(f"✅ {description}")
+            time.sleep(short_wait_time)
             return True
     except Exception as e:
-        print(f"❌ {description} échoué: {e}")
+        print(f"❌ {description}: {e}")
     return False
 
-def setup_table_fast(driver):
+def setup_styles_fast(driver):
     """Configuration rapide des styles"""
     try:
-        print("⚡ Configuration rapide...")
+        print("⚡ Configuration styles...")
         
-        # Essayer d'importer les styles (mais avec timeout court)
+        # Essayer rapidement d'importer
         if find_and_click_fast(driver, "button.go1782636986.accent", "Customize"):
-            time.sleep(short_wait_time)
-            
             if find_and_click_fast(driver, "button[title='Manage styles']", "Manage styles"):
-                time.sleep(short_wait_time)
                 
-                # Chercher Import rapidement
-                buttons = driver.find_elements(By.TAG_NAME, "button")
-                for button in buttons[:10]:
+                # Chercher Import
+                buttons = driver.find_elements(By.TAG_NAME, "button")[:8]
+                for button in buttons:
                     if "import" in button.text.lower():
                         button.click()
                         print("✅ Import cliqué")
                         time.sleep(short_wait_time)
                         
-                        # Upload fichier si trouvé
+                        # Upload fichier
                         file_inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='file']")
                         if file_inputs:
                             file_path = os.path.abspath("ztix.json")
@@ -162,7 +157,7 @@ def setup_table_fast(driver):
                                 print("✅ Fichier uploadé")
                                 time.sleep(short_wait_time)
                                 
-                                # Fermer les modaux
+                                # Fermer modaux
                                 close_popup_fast(driver)
                                 return True
         
@@ -170,17 +165,17 @@ def setup_table_fast(driver):
         return False
         
     except Exception as e:
-        print(f"⚠️ Configuration échouée: {e}")
+        print(f"⚠️ Configuration: {e}")
         return False
 
-def input_table_text_fast(driver, table_text):
+def input_text_fast(driver, table_text):
     """Saisie rapide du texte"""
     try:
-        print("📝 Saisie du texte...")
+        print("📝 Saisie texte...")
         
-        textarea = smart_wait(driver, EC.element_to_be_clickable((By.TAG_NAME, "textarea")), 5)
+        textarea = smart_wait(driver, EC.element_to_be_clickable((By.TAG_NAME, "textarea")), 3)
         if textarea:
-            # Méthode rapide: clear + send_keys
+            # Méthode directe
             textarea.clear()
             time.sleep(0.1)
             textarea.send_keys(table_text)
@@ -193,57 +188,58 @@ def input_table_text_fast(driver, table_text):
         return False
 
 def generate_table_image(table_text):
-    """Version optimisée de la génération"""
+    """Version ULTRA optimisée pour Render"""
     driver = None
     try:
-        print("🚀 Démarrage Chrome optimisé...")
+        print("🚀 Démarrage Chrome...")
         start_time = time.time()
         
         chrome_options = setup_chrome_options()
-        service = Service()
         
-        # Timeout global pour le driver
-        driver = webdriver.Chrome(service=service, options=chrome_options)
-        driver.set_page_load_timeout(15)
-        driver.set_script_timeout(10)
+        # IMPORTANT: Utilisation directe sans Service
+        driver = webdriver.Chrome(options=chrome_options)
+        
+        # Timeouts courts
+        driver.set_page_load_timeout(10)
+        driver.set_script_timeout(8)
         
         print("🌐 Navigation...")
         driver.get("https://gb2.hlorenzi.com/table")
         
-        print("⏳ Chargement page...")
-        time.sleep(1)  # Attente réduite
+        print("⏳ Chargement...")
+        time.sleep(1)  # Réduit
         
-        # Fermer pop-ups rapidement
+        # Fermer pop-ups
         close_popup_fast(driver)
         
-        # Configuration (mais avec timeout court)
-        setup_start = time.time()
-        setup_table_fast(driver)
-        print(f"⚙️ Configuration: {time.time() - setup_start:.1f}s")
+        # Configuration rapide
+        config_start = time.time()
+        setup_styles_fast(driver)
+        print(f"⚙️ Config: {time.time() - config_start:.1f}s")
         
-        # Saisie du texte
+        # Saisie
         input_start = time.time()
-        if not input_table_text_fast(driver, table_text):
-            raise Exception("Erreur saisie texte")
+        if not input_text_fast(driver, table_text):
+            raise Exception("Erreur saisie")
         print(f"📝 Saisie: {time.time() - input_start:.1f}s")
         
-        # Attente génération réduite
-        print("⏳ Génération tableau...")
-        time.sleep(2)  # Réduit de 2 secondes
+        # Génération réduite
+        print("⏳ Génération...")
+        time.sleep(long_wait_time)  # Réduit
         
-        # Capture image
+        # Capture
         capture_start = time.time()
-        image_data = download_table_image_fast(driver)
+        image_data = download_table_image(driver)
         print(f"📸 Capture: {time.time() - capture_start:.1f}s")
         
         total_time = time.time() - start_time
-        print(f"✅ Tableau généré en {total_time:.1f}s")
+        print(f"✅ Succès: {total_time:.1f}s")
         
         return image_data
         
     except Exception as e:
-        print(f"❌ Erreur génération: {e}")
-        raise Exception(f"Erreur: {str(e)}")
+        print(f"❌ Erreur: {e}")
+        raise Exception(f"Erreur génération: {str(e)}")
     
     finally:
         if driver:
@@ -270,15 +266,15 @@ async def on_message(message: discord.Message):
                 await message.channel.send("❌ **Texte trop long! Maximum 2000 caractères.**")
                 return
             
-            processing_msg = await message.channel.send("🔄 Génération en cours (version optimisée)...")
+            processing_msg = await message.channel.send("🔄 Génération en cours...")
             
             def generate_image():
                 return generate_table_image(table_text)
             
-            # Timeout global de 45 secondes
+            # Timeout de 30 secondes max
             image_data = await asyncio.wait_for(
                 asyncio.get_event_loop().run_in_executor(None, generate_image),
-                timeout=45.0
+                timeout=30.0
             )
             
             image_file = discord.File(io.BytesIO(image_data), filename="tableau.png")
@@ -291,24 +287,24 @@ async def on_message(message: discord.Message):
             await processing_msg.delete()
             
         except asyncio.TimeoutError:
-            await message.channel.send("❌ **Timeout - génération trop longue (>45s)**")
+            await message.channel.send("❌ **Timeout - génération trop longue (>30s)**")
         except Exception as e:
             error_msg = f"❌ Erreur: {str(e)}"
             await message.channel.send(error_msg)
             print(f"Erreur détaillée: {e}")
     
     elif message.content.lower() == "!ping":
-        await message.channel.send("🏓 Pong! Bot Selenium optimisé")
+        await message.channel.send("🏓 Pong! Bot optimisé Render")
 
 @client.event
 async def on_ready():
-    print(f'✅ Bot connecté en tant que {client.user}')
-    print(f'🚀 Version Selenium optimisée - Prêt!')
+    print(f'✅ Bot connecté: {client.user}')
+    print(f'🚀 Version optimisée Render - Prêt!')
 
 if __name__ == "__main__":
-    print("🚀 Démarrage du bot Discord optimisé...")
+    print("🚀 Démarrage bot optimisé Render...")
     
-    # Import ici pour éviter l'import circulaire
+    # Import time ici
     import time
     
     client.run(token)
