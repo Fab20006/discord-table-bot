@@ -1,5 +1,5 @@
 const { Client, GatewayIntentBits } = require('discord.js');
-const axios = require('axios');
+const puppeteer = require('puppeteer');
 
 console.log('🚀 Démarrage du bot...');
 
@@ -11,68 +11,154 @@ const client = new Client({
   ]
 });
 
-// Fonction pour générer l'image - NOUVELLE APPROCHE
-async function generateTableImage(tableText) {
+// Fonction pour interagir avec gb2.hlorenzi.com
+async function generateTableWithPuppeteer(tableText) {
+  let browser;
   try {
-    console.log('📊 Tentative de génération d\'image...');
+    console.log('🌐 Lancement du navigateur...');
     
-    // Essayer différentes URLs d'API possibles
-    const attempts = [
-      {
-        name: 'API directe avec data',
-        url: 'https://gb.hlorenzi.com/api.png',
-        method: 'get',
-        params: { data: tableText }
-      },
-      {
-        name: 'API avec input', 
-        url: 'https://gb.hlorenzi.com/api.png',
-        method: 'get',
-        params: { input: tableText }
-      },
-      {
-        name: 'Endpoint generate',
-        url: 'https://gb.hlorenzi.com/generate',
-        method: 'post',
-        data: { data: tableText }
-      }
+    browser = await puppeteer.launch({
+      headless: 'new',
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process',
+        '--disable-gpu'
+      ],
+      defaultViewport: { width: 1200, height: 800 }
+    });
+
+    const page = await browser.newPage();
+    
+    // Naviguer vers le NOUVEAU site
+    console.log('📡 Navigation vers gb2.hlorenzi.com/table...');
+    await page.goto('https://gb2.hlorenzi.com/table', {
+      waitUntil: 'networkidle2',
+      timeout: 30000
+    });
+
+    console.log('⏳ Attente du chargement de la page...');
+    await page.waitForTimeout(3000);
+
+    // Prendre une capture pour debug
+    console.log('📸 Capture de la page chargée...');
+    const initialScreenshot = await page.screenshot({ type: 'png' });
+    
+    // Chercher la zone de texte - essayer différents sélecteurs
+    console.log('🔍 Recherche de la zone de texte...');
+    const textareaSelectors = [
+      'textarea',
+      'input[type="text"]',
+      'input[type="textarea"]',
+      '.input',
+      '#input',
+      '[contenteditable="true"]',
+      'pre',
+      'code',
+      '.code-input',
+      '.text-input'
     ];
 
-    for (let attempt of attempts) {
-      try {
-        console.log(`🔄 Essai: ${attempt.name}`);
-        
-        let response;
-        if (attempt.method === 'get') {
-          response = await axios.get(attempt.url, {
-            params: attempt.params,
-            responseType: 'arraybuffer',
-            timeout: 15000
-          });
-        } else {
-          response = await axios.post(attempt.url, attempt.data, {
-            responseType: 'arraybuffer', 
-            timeout: 15000
-          });
-        }
-
-        // Vérifier si on a bien une image PNG
-        if (response.data && response.data.length > 100) { // Image valide
-          console.log(`✅ Succès avec: ${attempt.name}`);
-          console.log(`📏 Taille image: ${response.data.length} bytes`);
-          return Buffer.from(response.data);
-        }
-        
-      } catch (error) {
-        console.log(`❌ Échec avec ${attempt.name}: ${error.message}`);
+    let textArea = null;
+    let foundSelector = null;
+    
+    for (const selector of textareaSelectors) {
+      textArea = await page.$(selector);
+      if (textArea) {
+        foundSelector = selector;
+        console.log(`✅ Zone de texte trouvée avec: ${selector}`);
+        break;
       }
     }
 
-    throw new Error('Aucune méthode de génération n\'a fonctionné');
-    
+    if (!textArea) {
+      // Si aucun sélecteur ne marche, prendre une capture pour debug
+      const debugScreenshot = await page.screenshot({ type: 'png', fullPage: true });
+      throw new Error('Aucune zone de texte trouvée. Capture de debug prise.');
+    }
+
+    // Effacer le contenu existant
+    console.log('🧹 Nettoyage du contenu existant...');
+    await page.evaluate((selector) => {
+      const element = document.querySelector(selector);
+      if (element) {
+        element.value = '';
+        element.textContent = '';
+        element.focus();
+        
+        // Déclencher les événements de changement
+        const inputEvent = new Event('input', { bubbles: true });
+        element.dispatchEvent(inputEvent);
+      }
+    }, foundSelector);
+
+    // Écrire le nouveau texte
+    console.log('📝 Écriture du tableau...');
+    await page.type(foundSelector, tableText, { delay: 30 });
+
+    // Attendre que le tableau se génère automatiquement
+    console.log('⏳ Attente de la génération du tableau...');
+    await page.waitForTimeout(4000);
+
+    // Chercher la zone du tableau généré
+    console.log('🔍 Recherche du tableau généré...');
+    const tableSelectors = [
+      '.table',
+      '.output',
+      '.result',
+      '.generated',
+      'canvas',
+      'svg',
+      'img',
+      '.image-result',
+      '#output',
+      '[class*="table"]',
+      '[class*="output"]',
+      '[class*="result"]'
+    ];
+
+    let tableElement = null;
+    for (const selector of tableSelectors) {
+      tableElement = await page.$(selector);
+      if (tableElement) {
+        console.log(`✅ Tableau trouvé avec: ${selector}`);
+        break;
+      }
+    }
+
+    let screenshot;
+    if (tableElement) {
+      // Capturer seulement le tableau
+      console.log('📸 Capture du tableau...');
+      screenshot = await tableElement.screenshot({ 
+        type: 'png',
+        quality: 90
+      });
+    } else {
+      // Capturer toute la page si le tableau n'est pas trouvé spécifiquement
+      console.log('📸 Capture de toute la page...');
+      screenshot = await page.screenshot({ 
+        type: 'png',
+        quality: 90,
+        fullPage: true 
+      });
+    }
+
+    console.log('✅ Tableau généré avec succès!');
+    return screenshot;
+
   } catch (error) {
-    console.error('❌ Erreur génération image:', error);
-    throw error;
+    console.error('❌ Erreur lors de l\'interaction avec le site:', error);
+    throw new Error('Impossible de générer le tableau: ' + error.message);
+  } finally {
+    if (browser) {
+      await browser.close();
+      console.log('🔒 Navigateur fermé');
+    }
   }
 }
 
@@ -80,9 +166,16 @@ async function generateTableImage(tableText) {
 function validateTableFormat(tableText) {
   const lines = tableText.split('\n').filter(line => line.trim() !== '');
   const teamLines = lines.filter(line => line.includes('-'));
-  if (teamLines.length < 2) {
-    return '❌ **Format incorrect!** Il faut au moins 2 équipes.\nExemple: `Tag1 - NomÉquipe`';
+  
+  if (teamLines.length < 1) {
+    return '❌ **Format incorrect!** Il faut au moins 1 équipe.\nExemple: `Tag - NomÉquipe`';
   }
+  
+  const playerLines = lines.filter(line => !line.includes('-') && line.trim() !== '');
+  if (playerLines.length === 0) {
+    return '❌ **Aucun joueur trouvé!** Format: `Joueur Score`';
+  }
+  
   return null;
 }
 
@@ -101,15 +194,16 @@ client.on('messageCreate', async (message) => {
     try {
       console.log(`🔄 Traitement demande de ${message.author.tag}`);
       
-      const processingMsg = await message.reply('🔄 Génération du tableau en cours...');
+      const processingMsg = await message.reply('🔄 Interaction avec gb2.hlorenzi.com... (10-15 secondes)');
       
       // Extraire le texte du tableau
       const lines = message.content.split('\n');
       lines.shift();
       const tableText = lines.join('\n').trim();
       
+      // Validation
       if (!tableText) {
-        await processingMsg.edit('❌ **Message vide!**\n\n**Format:**\n```/maketable\nTag1 - Nom1\nJ1 Score1\nJ2 Score2\n\nTag2 - Nom2\nJ3 Score3\nJ4 Score4```');
+        await processingMsg.edit('❌ **Message vide!**\n\n**Format:**\n```/maketable\nA - Équipe Rouge\nJoueur1 1500\nJoueur2 1400\n\nB - Équipe Bleue\nJoueur3 1500\nJoueur4 1400```');
         return;
       }
 
@@ -119,35 +213,33 @@ client.on('messageCreate', async (message) => {
         return;
       }
 
-      console.log('📋 Tableau à générer:', tableText);
+      console.log('📋 Génération à partir de:', tableText);
       
-      // Essayer de générer l'image
-      try {
-        const imageBuffer = await generateTableImage(tableText);
-        
-        // Si on arrive ici, l'image a été générée !
-        await message.channel.send({
-          content: `📊 Tableau généré pour ${message.author}`,
-          files: [{ 
-            attachment: imageBuffer, 
-            name: 'tableau.png' 
-          }]
-        });
-        
-        console.log('✅ Image envoyée avec succès!');
-        
-      } catch (imageError) {
-        // Si la génération d'image échoue, envoyer le texte formaté
-        console.log('🔄 Génération image échouée, envoi du texte...');
-        const formattedTable = `📊 **Tableau pour ${message.author}**\n\`\`\`\n${tableText}\n\`\`\`\n\n*❌ Génération d'image temporairement indisponible*`;
-        await message.channel.send(formattedTable);
-      }
+      // Générer l'image avec Puppeteer
+      const imageBuffer = await generateTableWithPuppeteer(tableText);
+      
+      // Envoyer le résultat
+      await message.channel.send({
+        content: `📊 Tableau généré depuis gb2.hlorenzi.com pour ${message.author}`,
+        files: [{ 
+          attachment: imageBuffer, 
+          name: 'tableau.png' 
+        }]
+      });
       
       await processingMsg.delete();
+      console.log('✅ Tableau envoyé avec succès!');
       
     } catch (error) {
-      console.error('❌ Erreur:', error);
-      await message.reply('❌ **Erreur:** ' + error.message);
+      console.error('❌ Erreur finale:', error);
+      
+      // En cas d'erreur, envoyer le texte formaté
+      const lines = message.content.split('\n');
+      lines.shift();
+      const tableText = lines.join('\n').trim();
+      
+      const errorMessage = `❌ **Erreur avec gb2.hlorenzi.com**\n\n${error.message}\n\n**Votre tableau:**\n\`\`\`\n${tableText}\n\`\`\``;
+      await message.reply(errorMessage);
     }
   }
 });

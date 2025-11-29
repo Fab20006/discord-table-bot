@@ -1,14 +1,14 @@
 {
   "name": "discord-table-bot",
   "version": "1.0.0",
-  "description": "Bot Discord pour générer des tableaux",
+  "description": "Bot Discord pour générer des tableaux avec gb2.hlorenzi.com",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
     "discord.js": "^14.14.1",
-    "axios": "^1.6.2"
+    "puppeteer": "^21.0.0"
   },
   "engines": {
     "node": "18.x"
